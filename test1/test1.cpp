@@ -13,13 +13,13 @@
 typedef float DataType;
 #include "DeviceData_OptCarroll.h"
 #define CUDART_PI_F 3.141592654f
-//#define includeAC
+#define includeAC
 int main()
 {
 	int sum = 0;
 	int ArraySize = 10000;
-	int threadnum = 1;
-	int slicePerThread = ArraySize / threadnum;
+	int threadnum = 11;
+	int slicePerThread = (ArraySize+threadnum-1) / threadnum;
 	omp_set_num_threads(threadnum);
 	clock_t start, finish;
 	start = clock();
@@ -102,6 +102,21 @@ int main()
 		DataType *NcbGS = (DataType*)malloc(slicePerThread * sizeof(DataType));                                                   //[NumPops, NumSlices] Number of carriers in GS[>= 0]
 		DataType *RhocbES1 = (DataType*)malloc(slicePerThread * sizeof(DataType));                                  //[NumPops, NumSlices] Occupation probability for ES1[>= 0, <= 1]
 		DataType *RhocbGS = (DataType*)malloc(slicePerThread * sizeof(DataType));                                     //[NumPops, NumSlices] Occupation probability for GS[>= 0, <= 1]
+		
+		CudaComplex *NcbWLAC = (CudaComplex*)malloc(slicePerThread * sizeof(CudaComplex));
+		CudaComplex *NcbES1AC = (CudaComplex*)malloc(slicePerThread * sizeof(CudaComplex));
+		CudaComplex *NcbGSAC = (CudaComplex*)malloc(slicePerThread * sizeof(CudaComplex));
+		CudaComplex *RhocbES1AC = (CudaComplex*)malloc(slicePerThread * sizeof(CudaComplex));
+		CudaComplex *RhocbGSAC = (CudaComplex*)malloc(slicePerThread * sizeof(CudaComplex));
+
+		for (int j = 0; j < slicePerThread; j++) {
+			NcbWLAC[j] = CudaComplex(0., 0.);
+			NcbES1AC[j] = CudaComplex(0., 0.);
+			NcbGSAC[j] = CudaComplex(0., 0.);
+			RhocbES1AC[j] = CudaComplex(0., 0.);
+			RhocbGSAC[j] = CudaComplex(0., 0.);
+		}
+		
 		memset(NcbWL, 0., slicePerThread * sizeof(DataType));
 		memset(NcbES1, 0., slicePerThread * sizeof(DataType));
 		memset(NcbGS, 0., slicePerThread * sizeof(DataType));
@@ -245,10 +260,10 @@ int main()
 				DataType RecombinationWL = NonRadiativeRecombinationWL;                            //[1, NumSlices] In the WL we have only non radiative recombinations[ns^-1]
 
 #ifdef includeAC
-				CaptureFromWL2ES1 = CaptureFromWL2ES1 - 2 * real(RhocbES1AC*conj(NcbWLAC))*OneOverTauCapcbWL2ES1;
-				CudaComplex RecombinationWLAC = NcbWLAC * OneOverTauNRcbWL;
-				CudaComplex EscapeFromES1AC2WLAC = NcbES1AC / TauEsccbES12WL;
-				CudaComplex CaptureFromES1AC2WLAC = ((1 - RhocbES1)*NcbWLAC - RhocbES1AC * NcbWL)*OneOverTauCapcbWL2ES1;
+				CaptureFromWL2ES1 = CaptureFromWL2ES1 - 2 * real(RhocbES1AC[j]*conj(NcbWLAC[j]))*OneOverTauCapcbWL2ES1;
+				CudaComplex RecombinationWLAC = NcbWLAC[j] * OneOverTauNRcbWL;
+				CudaComplex EscapeFromES1AC2WLAC = NcbES1AC[j] / TauEsccbES12WL;
+				CudaComplex CaptureFromES1AC2WLAC = ((1 - RhocbES1[j])*NcbWLAC[j] - RhocbES1AC[j] * NcbWL[j])*OneOverTauCapcbWL2ES1;
 				CudaComplex dNcbWLAC = -RecombinationWLAC + (EscapeFromES1AC2WLAC - CaptureFromES1AC2WLAC);
 #endif
 				DataType dNcbWL =                                                               //[1, NumSlices] Variation rate for WL carrier number[ns^-1]
@@ -262,13 +277,13 @@ int main()
 				DataType CaptureFromES12GS = (NcbES1[j]*(1 - RhocbGS[j]))*OneOverTauCapcbES12GS;         //[NumPops, NumSlices] Capture rate from ES1 to GS[ns^-1]
 				DataType NonRadiativeRecombES1 = NcbES1[j] * OneOverTauNRcbES1;                         //[NumPops, NumSlices] Non radiative recombination rate for ES1[ns^-1]
 #ifdef includeAC
-				SpontaneousEmissionES1 = SpontaneousEmissionES1 + 2 * real(RhocbES1AC*conj(NcbES1AC))*OneOverTauSpontES1;
-				CudaComplex SpontaneousEmissionES1AC = (NcbES1*RhocbES1AC + NcbES1AC * RhocbES1)*OneOverTauSpontES1;
-				EscapeFromGS2ES1 = EscapeFromGS2ES1 - 2 * real(RhocbES1AC*conj(NcbGSAC))*OneOverTauEsccbGS2ES1;
-				CudaComplex EscapeFromGSAC2ES1AC = NcbGSAC * (1 - RhocbES1) - NcbGS * RhocbES1AC*OneOverTauEsccbGS2ES1;
-				CaptureFromES12GS = CaptureFromES12GS - 2 * real(RhocbGSAC*conj(NcbES1AC))*OneOverTauCapcbES12GS;
-				CudaComplex CaptureFromES1AC2GSAC = (NcbES1*(-RhocbGSAC) + NcbES1AC * (1 - RhocbGS))*OneOverTauCapcbES12GS;
-				CudaComplex NonRadiativeRecombES1AC = NcbES1AC * OneOverTauNRcbES1;
+				SpontaneousEmissionES1 = SpontaneousEmissionES1 + 2 * real(RhocbES1AC[j]*conj(NcbES1AC[j]))*OneOverTauSpontES1;
+				CudaComplex SpontaneousEmissionES1AC = (NcbES1[j]*RhocbES1AC[j] + NcbES1AC[j] * RhocbES1[j])*OneOverTauSpontES1;
+				EscapeFromGS2ES1 = EscapeFromGS2ES1 - 2 * real(RhocbES1AC[j]*conj(NcbGSAC[j]))*OneOverTauEsccbGS2ES1;
+				CudaComplex EscapeFromGSAC2ES1AC = NcbGSAC[j] * (1 - RhocbES1[j]) - NcbGS[j] * RhocbES1AC[j]*OneOverTauEsccbGS2ES1;
+				CaptureFromES12GS = CaptureFromES12GS - 2 * real(RhocbGSAC[j]*conj(NcbES1AC[j]))*OneOverTauCapcbES12GS;
+				CudaComplex CaptureFromES1AC2GSAC = (NcbES1[j]*(-RhocbGSAC[j]) + NcbES1AC[j] * (1 - RhocbGS[j]))*OneOverTauCapcbES12GS;
+				CudaComplex NonRadiativeRecombES1AC = NcbES1AC[j] * OneOverTauNRcbES1;
 				CudaComplex RecombinationsES1AC = NonRadiativeRecombES1AC + SpontaneousEmissionES1AC;
 				CudaComplex dNcbES1AC = CaptureFromES1AC2WLAC - RecombinationsES1AC - EscapeFromES1AC2WLAC + EscapeFromGSAC2ES1AC - CaptureFromES1AC2GSAC;
 #endif // includeAC
@@ -289,11 +304,11 @@ int main()
 				DataType NonRadiativeRecombGS = NcbGS[j] * OneOverTauNRcbGS;                            //[NumPops, NumSlices] Non radiative recombination rate for GS[ns^-1]
 
 #ifdef includeAC
-				SpontaneousEmissionGS = SpontaneousEmissionGS + 2 * real(RhocbGSAC*conj(NcbGSAC))*OneOverTauSpontGS;
-				CudaComplex SpontaneousEmissionGSAC = (NcbGS*RhocbGSAC + NcbGSAC * RhocbGS)*OneOverTauSpontGS;
+				SpontaneousEmissionGS = SpontaneousEmissionGS + 2 * real(RhocbGSAC[j]*conj(NcbGSAC[j]))*OneOverTauSpontGS;
+				CudaComplex SpontaneousEmissionGSAC = (NcbGS[j]*RhocbGSAC[j] + NcbGSAC[j] * RhocbGS[j])*OneOverTauSpontGS;
 				CudaComplex StimulatedEmissionGSAC = 0.5*StimulatedEmissionCoeffGSXY*
-					(GainGS[cc] * (EnergyGSProgRegr + conj(EnergyGSRegrProg)) + GainGSAC[cc] * (EnergyGSProgProg + conj(EnergyGSRegrRegr)));
-				CudaComplex NonRadiativeRecombGSAC = NcbGSAC * OneOverTauNRcbGSAC;
+					(GainGS[j][cc] * (EnergyGSProgRegr[j] + conj(EnergyGSRegrProg[j])) + GainGSAC[j][cc] * (EnergyGSProgProg[j] + conj(EnergyGSRegrRegr[j])));
+				CudaComplex NonRadiativeRecombGSAC = NcbGSAC[j] * OneOverTauNRcbGSAC;
 				CudaComplex RecombinationsGSAC = NonRadiativeRecombGSAC + SpontaneousEmissionGSAC + StimulatedEmissionGSAC;
 				CudaComplex dNcbGSAC = CaptureFromES1AC2GSAC - RecombinationsGSAC - EscapeFromGSAC2ES1AC;
 #endif // includeAC
@@ -318,11 +333,11 @@ int main()
 				//float myrandf = curand_uniform(&randstate);
 
 #ifdef includeAC
-				NcbWLAC = NcbWLAC + dt * dNcbWLAC;
-				NcbES1AC = NcbES1AC + dt * dNcbES1AC;
-				RhocbES1AC = NcbES1AC / DotNumberByDegeneracyES1;
-				NcbGSAC = NcbGSAC + dt * dNcbGSAC;
-				RhocbGSAC = NcbGSAC / DotNumberByDegeneracyGS;
+				NcbWLAC[j] = NcbWLAC[j] + dt * dNcbWLAC;
+				NcbES1AC[j] = NcbES1AC[j] + dt * dNcbES1AC;
+				RhocbES1AC[j] = NcbES1AC[j] / DotNumberByDegeneracyES1;
+				NcbGSAC[j] = NcbGSAC[j] + dt * dNcbGSAC;
+				RhocbGSAC[j] = NcbGSAC[j] / DotNumberByDegeneracyGS;
 #endif // includeAC
 
 
@@ -337,9 +352,9 @@ int main()
 				ModalGainGS[j][pp] = ModalGainGSpp[j];
 
 #ifdef includeAC
-				GainGSAC[pp] = 0.5*(MaterialGainGS * 2 * RhocbGSAC);
-				ModalGainGSACpp = GainGSAC[pp] * GammaXY;
-				ModalGainGSAC[pp] = ModalGainGSACpp;
+				GainGSAC[j][pp] = 0.5*(MaterialGainGS * 2 * RhocbGSAC[j]);
+				ModalGainGSACpp[j] = GainGSAC[j][pp] * GammaXY;
+				ModalGainGSAC[j][pp] = ModalGainGSACpp[j];
 #endif // includeAC
 
 
@@ -442,8 +457,8 @@ int main()
 				EnergyGSProgProg[j] = EProgppExpanded * conj(IfieldGSProg[j][pp]);
 				EnergyGSRegrRegr[j] = ERegrppExpanded * conj(IfieldGSRegr[j][pp]);
 #ifdef includeAC
-				EnergyGSProgRegr = EProgppExpanded * conj(IfieldGSRegr[pp]);
-				EnergyGSRegrProg = ERegrppExpanded * conj(IfieldGSProg[pp]);
+				EnergyGSProgRegr[j] = EProgppExpanded * conj(IfieldGSRegr[j][pp]);
+				EnergyGSRegrProg[j] = ERegrppExpanded * conj(IfieldGSProg[j][pp]);
 #endif // includeAC
 				
 			}
@@ -472,9 +487,9 @@ int main()
 	}
 
 
-	for (int i = 0; i < ArraySize; i++) {
-		Regr_Vec[i].display();
-	}
+	//for (int i = 0; i < ArraySize; i++) {
+	//	Regr_Vec[i].display();
+	//}
 	finish = clock();
 	double duration = (double)(finish - start) / CLOCKS_PER_SEC;
 	printf("%f seconds\n", duration);
